@@ -34,6 +34,9 @@ class SweepSettings : PersistentStateComponent<SweepSettings> {
         private const val DEFAULT_NEXT_EDIT_PREDICTION_ON = true
         private const val DEFAULT_ACCEPT_WORD_ON_RIGHT_ARROW = true
         private const val DEFAULT_ANTHROPIC_API_KEY = ""
+        private const val DEFAULT_CUSTOM_AUTOCOMPLETE_URL = ""
+        private const val DEFAULT_CUSTOM_AUTOCOMPLETE_API_KEY = ""
+        private const val DEFAULT_CUSTOM_AUTOCOMPLETE_MODEL = ""
         private const val DEFAULT_PLAY_NOTIFICATION_ON_STREAM_END = false
         private const val DEFAULT_DEVELOPER_MODE_ON = false
 
@@ -118,6 +121,30 @@ class SweepSettings : PersistentStateComponent<SweepSettings> {
         set(value) {
             field = value
         }
+
+    var customAutocompleteUrl: String = DEFAULT_CUSTOM_AUTOCOMPLETE_URL
+        get() = field.trim().trimEnd('/')
+        set(value) {
+            field = value
+            notifySettingsChanged()
+        }
+
+    var customAutocompleteApiKey: String = DEFAULT_CUSTOM_AUTOCOMPLETE_API_KEY
+        get() = field.trim()
+        set(value) {
+            field = value
+            notifySettingsChanged()
+        }
+
+    var customAutocompleteModel: String = DEFAULT_CUSTOM_AUTOCOMPLETE_MODEL
+        get() = field.trim()
+        set(value) {
+            field = value
+            notifySettingsChanged()
+        }
+
+    val hasCustomAutocompleteProvider: Boolean
+        get() = customAutocompleteUrl.isNotBlank() && customAutocompleteApiKey.isNotBlank() && customAutocompleteModel.isNotBlank()
 
     var playNotificationOnStreamEnd: Boolean = DEFAULT_PLAY_NOTIFICATION_ON_STREAM_END
         set(value) {
@@ -236,7 +263,9 @@ class SweepSettings : PersistentStateComponent<SweepSettings> {
      */
     val hasBeenSet: Boolean
         get() =
-            if (SweepSettingsParser.isCloudEnvironment()) {
+            if (hasCustomAutocompleteProvider) {
+                true
+            } else if (SweepSettingsParser.isCloudEnvironment()) {
                 githubToken != DEFAULT_GITHUB_TOKEN
             } else {
                 githubToken != DEFAULT_GITHUB_TOKEN && baseUrl != DEFAULT_SWEEP_URL

@@ -3289,6 +3289,48 @@ class SweepConfig(
                 )
             }
 
+        val customAutocompleteUrlField =
+            JTextField(sweepSettings.customAutocompleteUrl).apply {
+                withSweepFont(project)
+                val scaleFactor = (state.fontSize / JBUI.Fonts.label().size).coerceIn(1f, 2f)
+                val maxWidth = (600 * scaleFactor).toInt().scaled
+                maximumSize = Dimension(maxWidth, preferredSize.height)
+                preferredSize = Dimension(maxWidth, preferredSize.height)
+                addFocusListener(
+                    FocusLostAdaptor {
+                        sweepSettings.customAutocompleteUrl = text
+                    },
+                )
+            }
+
+        val customAutocompleteApiKeyField =
+            JPasswordField(sweepSettings.customAutocompleteApiKey).apply {
+                withSweepFont(project)
+                val scaleFactor = (state.fontSize / JBUI.Fonts.label().size).coerceIn(1f, 2f)
+                val maxWidth = (600 * scaleFactor).toInt().scaled
+                maximumSize = Dimension(maxWidth, preferredSize.height)
+                preferredSize = Dimension(maxWidth, preferredSize.height)
+                addFocusListener(
+                    FocusLostAdaptor {
+                        sweepSettings.customAutocompleteApiKey = String(password)
+                    },
+                )
+            }
+
+        val customAutocompleteModelField =
+            JTextField(sweepSettings.customAutocompleteModel).apply {
+                withSweepFont(project)
+                val scaleFactor = (state.fontSize / JBUI.Fonts.label().size).coerceIn(1f, 2f)
+                val maxWidth = (600 * scaleFactor).toInt().scaled
+                maximumSize = Dimension(maxWidth, preferredSize.height)
+                preferredSize = Dimension(maxWidth, preferredSize.height)
+                addFocusListener(
+                    FocusLostAdaptor {
+                        sweepSettings.customAutocompleteModel = text
+                    },
+                )
+            }
+
         // Function to open/create commit template file
         fun openCommitTemplateFile() {
             val basePath = project.osBasePath
@@ -4776,6 +4818,65 @@ class SweepConfig(
                                 gbc,
                             )
                         }
+
+                        // Custom Autocomplete Provider
+                        gbc.gridy = 5
+                        add(
+                            JPanel().apply {
+                                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                                border = JBUI.Borders.empty(8, 16)
+
+                                add(
+                                    JLabel("<html><b>Custom Autocomplete Provider</b></html>").apply {
+                                        border = JBUI.Borders.empty(0, 4, 4, 0)
+                                        withSweepFont(project)
+                                    },
+                                )
+
+                                add(
+                                    JLabel("OpenAI-compatible endpoint URL").apply {
+                                        withSweepFont(project, scale = 0.9f)
+                                        foreground = JBColor.GRAY
+                                        border = JBUI.Borders.empty(4, 4, 2, 0)
+                                        alignmentX = Component.LEFT_ALIGNMENT
+                                    },
+                                )
+                                add(customAutocompleteUrlField.apply { alignmentX = Component.LEFT_ALIGNMENT })
+                                add(
+                                    createCommentLabel("Example: https://api.example.com/v1 or a full /chat/completions URL").apply {
+                                        border = JBUI.Borders.empty(4, 4, 8, 0)
+                                        withSweepFont(project, scale = 0.85f)
+                                    },
+                                )
+
+                                add(
+                                    JLabel("API Key").apply {
+                                        withSweepFont(project, scale = 0.9f)
+                                        foreground = JBColor.GRAY
+                                        border = JBUI.Borders.empty(4, 4, 2, 0)
+                                        alignmentX = Component.LEFT_ALIGNMENT
+                                    },
+                                )
+                                add(customAutocompleteApiKeyField.apply { alignmentX = Component.LEFT_ALIGNMENT })
+
+                                add(
+                                    JLabel("Model").apply {
+                                        withSweepFont(project, scale = 0.9f)
+                                        foreground = JBColor.GRAY
+                                        border = JBUI.Borders.empty(8, 4, 2, 0)
+                                        alignmentX = Component.LEFT_ALIGNMENT
+                                    },
+                                )
+                                add(customAutocompleteModelField.apply { alignmentX = Component.LEFT_ALIGNMENT })
+                                add(
+                                    createCommentLabel("When URL, API key, and model are set, autocomplete uses this provider instead of Sweep's autocomplete service.").apply {
+                                        border = JBUI.Borders.empty(4, 4, 0, 0)
+                                        withSweepFont(project, scale = 0.85f)
+                                    },
+                                )
+                            },
+                            gbc,
+                        )
 
                         // Local Autocomplete section
                         gbc.gridy = 6

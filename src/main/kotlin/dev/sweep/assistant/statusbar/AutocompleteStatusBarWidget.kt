@@ -99,13 +99,14 @@ class AutocompleteStatusBarWidget(
         // Show darker icon when snoozed, offline, or out of completions
         return snoozeService.isAutocompleteSnooze() ||
             !isAlive ||
-            (entitlementInfo?.autocomplete_suggestions_remaining == 0)
+            (!SweepSettings.getInstance().hasCustomAutocompleteProvider && entitlementInfo?.autocomplete_suggestions_remaining == 0)
     }
 
     override fun getClickConsumer(): Consumer<MouseEvent>? = clickHandler
 
     override fun getTooltipText(): String =
         when {
+            SweepSettings.getInstance().hasCustomAutocompleteProvider -> "Sweep Autocomplete: Custom Provider - Click for options"
             SweepConfig.getInstance(project).isAutocompleteLocalMode() -> "Sweep Autocomplete: Local Mode - Click for options"
             snoozeService.isAutocompleteSnooze() -> {
                 val remaining = snoozeService.formatRemainingTime()
@@ -180,9 +181,11 @@ class AutocompleteStatusBarWidget(
         val currentEntitlementInfo = entitlementInfo
 
         val isLocalMode = SweepConfig.getInstance(project).isAutocompleteLocalMode()
+        val isCustomProvider = SweepSettings.getInstance().hasCustomAutocompleteProvider
 
         val accessStatus =
             when {
+                isCustomProvider -> "Custom Provider"
                 isLocalMode -> if (isAlive) "Local Mode" else "Local Mode (Offline)"
                 snoozeService.isAutocompleteSnooze() -> {
                     val remaining = snoozeService.formatRemainingTime()
@@ -390,6 +393,11 @@ class AutocompleteStatusBarWidget(
     }
 
     private suspend fun performHealthCheck(): Boolean {
+        if (SweepSettings.getInstance().hasCustomAutocompleteProvider) {
+            entitlementInfo = null
+            return true
+        }
+
         // In local mode, check the local server health instead of cloud entitlement
         if (SweepConfig.getInstance(project).isAutocompleteLocalMode()) {
             return withContext(Dispatchers.IO) {
