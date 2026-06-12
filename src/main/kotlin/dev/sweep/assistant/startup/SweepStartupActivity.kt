@@ -1,6 +1,5 @@
 package dev.sweep.assistant.startup
 
-import com.intellij.ide.BrowserUtil
 import com.intellij.ide.actions.ShowSettingsUtilImpl
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.notification.NotificationAction
@@ -242,20 +241,6 @@ class SweepStartupActivity :
             metaData.hasSeenInstallationTelemetryEvent = true
         }
 
-        if (!SweepSettings.getInstance().hasBeenSet) {
-            if (SweepSettingsParser.isCloudEnvironment()) {
-                // Cloud: open tool window for login/settings
-                ApplicationManager.getApplication().invokeLater {
-                    if (!project.isDisposed) {
-                        ToolWindowManager.getInstance(project).getToolWindow(SweepConstants.TOOLWINDOW_NAME)?.show()
-                    }
-                }
-            } else {
-                // Non-cloud: preserve existing behavior
-                SweepAuthServer.start(project)
-            }
-        }
-
         // Register appropriate status bar widget based on gateway mode
         when (SweepConstants.GATEWAY_MODE) {
             SweepConstants.GatewayMode.CLIENT -> {
@@ -263,12 +248,6 @@ class SweepStartupActivity :
                 ApplicationManager.getApplication().invokeLater {
                     val statusBar = WindowManager.getInstance().getStatusBar(project)
                     statusBar?.addWidget(FrontendStatusBarWidgetFactory().createWidget(project), "before Position")
-
-                    // Only start auth flow and open browser if user is not authenticated
-                    if (!SweepSettings.getInstance().hasBeenSet) {
-                        SweepAuthServer.start(project)
-                        BrowserUtil.browse("https://app.sweep.dev", project)
-                    }
                 }
             }
             SweepConstants.GatewayMode.HOST -> {

@@ -19,7 +19,6 @@ import javax.swing.*
 class SweepSettingsConfigurable(
     private val project: Project,
 ) : Configurable {
-    private var githubTokenField: JPasswordField? = null
     private var baseUrlField: JTextField? = null
     private var anthropicApiKeyField: JPasswordField? = null
     private val settings = SweepSettings.getInstance()
@@ -75,7 +74,6 @@ class SweepSettingsConfigurable(
     override fun getDisplayName(): String = SweepConstants.PLUGIN_NAME
 
     override fun reset() {
-        githubTokenField?.text = settings.githubToken
         baseUrlField?.text = settings.baseUrl
         betaFlagField?.isSelected = settings.betaFlagOn
     }

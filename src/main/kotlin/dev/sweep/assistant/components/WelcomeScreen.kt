@@ -2,19 +2,15 @@ package dev.sweep.assistant.components
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.TopGap
 import com.intellij.ui.dsl.builder.panel
 import com.intellij.util.ui.JBUI
 import dev.sweep.assistant.services.SweepProjectService
-import dev.sweep.assistant.settings.SweepSettings
-import dev.sweep.assistant.settings.SweepSettingsParser
 import dev.sweep.assistant.theme.SweepColors
 import dev.sweep.assistant.theme.SweepIcons
 import dev.sweep.assistant.theme.SweepIcons.scale
-import dev.sweep.assistant.utils.SweepConstants.TOOLWINDOW_NAME
 import dev.sweep.assistant.views.RoundedButton
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
@@ -38,28 +34,18 @@ class WelcomeScreen(
                         }.align(AlignX.CENTER)
                 }.topGap(TopGap.SMALL)
                 row {
-                    text("Please sign in below:").applyToComponent { font = font.deriveFont(font.size * 1.1f) }.align(AlignX.CENTER)
+                    text("Configure Sweep below:").applyToComponent { font = font.deriveFont(font.size * 1.1f) }.align(AlignX.CENTER)
                 }
                 row {
                     cell(
                         RoundedButton(
-                            text = " Sign in",
+                            text = " Settings",
                             parentDisposable = parentDisposable,
                             onClick = {
-                                val isCloudEnvironment = SweepSettingsParser.isCloudEnvironment()
-                                if (isCloudEnvironment) {
-                                    // Trigger Sweep OAuth flow
-                                    ToolWindowManager
-                                        .getInstance(project)
-                                        .getToolWindow(TOOLWINDOW_NAME)
-                                        ?.hide()
-                                    SweepSettings.getInstance().initiateGitHubAuth(project)
-                                } else {
-                                    SweepConfig.getInstance(project).showConfigPopup()
-                                }
+                                SweepConfig.getInstance(project).showConfigPopup()
                             },
                         ).apply {
-                            icon = SweepIcons.UserIcon.scale(16f)
+                            icon = SweepIcons.EditIcon.scale(16f)
                             background = SweepColors.loginButtonColor
                             foreground = SweepColors.textOnPrimary
                             font = font.deriveFont(font.size * 1.2f)

@@ -1,6 +1,5 @@
 package dev.sweep.assistant.utils
 
-import dev.sweep.assistant.data.UsernameResponse
 import dev.sweep.assistant.settings.SweepSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -21,7 +20,7 @@ import java.net.URI
  * - POST method
  * - Output enabled
  * - Content-Type set to application/json
- * - Authorization header with GitHub token
+ * - Authorization header for the configured backend
  * - Non-proxy hosts set to "*"
  * - Configurable connection and read timeouts
  */
@@ -76,40 +75,5 @@ suspend fun <T> sendToApi(
             throw IOException("Error communicating with Sweep API at $endpoint: ${e.message}", e)
         } finally {
             connection.disconnect()
-        }
-    }
-
-/**
- * Fetches the username associated with the current GitHub token.
- *
- * @return The username as a UsernameResponse, or null if the request fails
- */
-suspend fun getUsername(): UsernameResponse? =
-    withContext(Dispatchers.IO) {
-        try {
-            val baseUrl = SweepSettings.getInstance().baseUrl
-            val url = URI("$baseUrl/backend/get_username").toURL()
-            val connection =
-                (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    setRequestProperty("http.nonProxyHosts", "*")
-                    setRequestProperty("Authorization", "Bearer ${SweepSettings.getInstance().githubToken}")
-                    connectTimeout = 10_000
-                    readTimeout = 10_000
-                }
-
-            try {
-                if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                    val responseText = connection.inputStream.bufferedReader().use { it.readText() }
-                    val json = Json { ignoreUnknownKeys = true }
-                    json.decodeFromString<UsernameResponse>(responseText)
-                } else {
-                    null
-                }
-            } finally {
-                connection.disconnect()
-            }
-        } catch (e: Exception) {
-            null
         }
     }

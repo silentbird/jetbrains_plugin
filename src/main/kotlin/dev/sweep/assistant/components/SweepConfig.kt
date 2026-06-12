@@ -54,8 +54,6 @@ import dev.sweep.assistant.services.LocalAutocompleteServerManager
 import dev.sweep.assistant.services.SweepMcpService
 import dev.sweep.assistant.settings.CustomPrompt
 import dev.sweep.assistant.settings.SweepEnvironmentConstants
-import dev.sweep.assistant.settings.SweepEnvironmentConstants.Messages.GITHUB_TOKEN_COMMENT
-import dev.sweep.assistant.settings.SweepEnvironmentConstants.Messages.SETTINGS_DESCRIPTION
 import dev.sweep.assistant.settings.SweepMetaData
 import dev.sweep.assistant.settings.SweepSettings
 import dev.sweep.assistant.settings.SweepSettingsParser
@@ -3260,21 +3258,6 @@ class SweepConfig(
                 }
             }
 
-        // Add SweepSettings fields
-        val githubTokenField =
-            JPasswordField(sweepSettings.githubToken).apply {
-                withSweepFont(project)
-                val scaleFactor = (state.fontSize / JBUI.Fonts.label().size).coerceIn(1f, 2f)
-                val maxWidth = (600 * scaleFactor).toInt().scaled
-                maximumSize = Dimension(maxWidth, preferredSize.height)
-                preferredSize = Dimension(maxWidth, preferredSize.height)
-                addFocusListener(
-                    FocusLostAdaptor {
-                        sweepSettings.githubToken = String(password)
-                    },
-                )
-            }
-
         val baseUrlField =
             JTextField(sweepSettings.baseUrl).apply {
                 withSweepFont(project)
@@ -4639,80 +4622,15 @@ class SweepConfig(
                             JPanel(BorderLayout()).apply {
                                 border = JBUI.Borders.empty(0, 16, 8, 16)
                                 add(
-                                    JLabel(SETTINGS_DESCRIPTION).withSweepFont(project),
+                                    JLabel("<html><h3>Configure local and custom provider settings:</h3></html>").withSweepFont(project),
                                     BorderLayout.WEST,
                                 )
                             },
                             gbc,
                         )
 
-                        // GitHub Token
-                        gbc.gridy = 2
-                        add(
-                            JPanel().apply {
-                                layout = BoxLayout(this, BoxLayout.Y_AXIS)
-                                border = JBUI.Borders.empty(8, 16)
-
-                                val tokenLabel =
-                                    JLabel(
-                                        if (sweepSettings.githubToken.isNotBlank()) {
-                                            "<html><b>Sweep Token</b> <font color='#4CAF50'>✓ signed in</font></html>"
-                                        } else {
-                                            "<html><b>Sweep Token</b></html>"
-                                        },
-                                    ).apply {
-                                        border = JBUI.Borders.empty(0, 4, 4, 0)
-                                    }
-
-                                add(tokenLabel)
-
-                                // Fetch username asynchronously if token is present
-                                if (sweepSettings.githubToken.isNotBlank()) {
-                                    ApplicationManager.getApplication().executeOnPooledThread {
-                                        val usernameResponse = runBlocking { getUsername() }
-                                        ApplicationManager.getApplication().invokeLater {
-                                            if (usernameResponse != null && usernameResponse.username.isNotBlank()) {
-                                                tokenLabel.text =
-                                                    "<html><b>Sweep Token</b> <font color='#4CAF50'>✓ signed in as ${usernameResponse.username.replace(
-                                                        "<",
-                                                        "&lt;",
-                                                    ).replace(">", "&gt;").replace("&", "&amp;")}</font></html>"
-
-                                                // If backend enforces privacy mode, disable the checkbox and force it to be selected
-                                                if (usernameResponse.privacyModeEnabled) {
-                                                    privacyModeCheckBox?.let { checkbox ->
-                                                        checkbox.isSelected = true
-                                                        checkbox.isEnabled = false
-                                                        checkbox.toolTipText =
-                                                            "Privacy mode is enforced by your organization and cannot be disabled. Sweep will not store, train on, or evaluate models on any of your code or prompts."
-                                                    }
-                                                }
-                                            } else {
-                                                // Show error state when username fetch fails
-                                                tokenLabel.text =
-                                                    "<html><b>Sweep Token</b> <font color='#F44336'>✗ Your token is incorrect, please click \"Switch Accounts\" to sign in again</font></html>"
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Token field
-                                add(
-                                    githubTokenField.apply {
-                                        alignmentX = Component.LEFT_ALIGNMENT
-                                    },
-                                )
-                                add(
-                                    createCommentLabel(GITHUB_TOKEN_COMMENT).apply {
-                                        border = JBUI.Borders.empty(4, 4, 0, 0)
-                                    },
-                                )
-                            },
-                            gbc,
-                        )
-
                         // Base URL
-                        gbc.gridy = 3
+                        gbc.gridy = 2
                         if (!SweepSettingsParser.isCloudEnvironment()) {
                             add(
                                 JPanel().apply {
@@ -4782,45 +4700,8 @@ class SweepConfig(
                             )
                         }
 
-                        // Relogin button at bottom - only in cloud environment
-                        if (SweepSettingsParser.isCloudEnvironment()) {
-                            gbc.gridy = 4
-                            add(
-                                JPanel().apply {
-                                    layout = BoxLayout(this, BoxLayout.X_AXIS)
-                                    border = JBUI.Borders.empty(16, 16, 8, 16)
-
-                                    val isAuthenticated = sweepSettings.githubToken.isNotBlank()
-                                    val buttonText = if (isAuthenticated) "Switch Accounts" else "Sign in"
-
-                                    add(
-                                        JButton(buttonText).apply {
-                                            withSweepFont(project)
-                                            toolTipText = "Clear the current token and open login page"
-                                            addActionListener {
-                                                // Clear the token
-                                                sweepSettings.githubToken = ""
-                                                githubTokenField.text = ""
-
-                                                // Close the current dialog
-                                                configDialog?.close(0)
-
-                                                // Re-open the login page
-                                                ApplicationManager.getApplication().invokeLater {
-                                                    sweepSettings.initiateGitHubAuth(project)
-                                                }
-                                            }
-                                        },
-                                    )
-
-                                    add(Box.createHorizontalGlue())
-                                },
-                                gbc,
-                            )
-                        }
-
                         // Custom Autocomplete Provider
-                        gbc.gridy = 5
+                        gbc.gridy = 3
                         add(
                             JPanel().apply {
                                 layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -6179,23 +6060,6 @@ class SweepConfig(
                         },
                     )
 
-                    // Add Manage Account button if authenticated
-                    if (sweepSettings.githubToken.isNotBlank()) {
-                        actions.add(
-                            object : AbstractAction("Manage Account") {
-                                init {
-                                    putValue(SMALL_ICON, AllIcons.General.User)
-                                    putValue("JButton.buttonType", "borderless")
-                                    putValue("ActionButton.showText", true)
-                                }
-
-                                override fun actionPerformed(e: ActionEvent?) {
-                                    BrowserUtil.browse("https://app.sweep.dev", project)
-                                }
-                            },
-                        )
-                    }
-
                     return actions.toTypedArray()
                 }
 
@@ -6242,12 +6106,8 @@ class SweepConfig(
         // Set the dialog reference
         configDialog = dialog
 
-        settingsUpdateCallback = { updatedSettings ->
-            // Update the password field with the current token value
-            // This ensures the field shows the actual token when user logs in
+        settingsUpdateCallback = {
             ApplicationManager.getApplication().invokeLater {
-                githubTokenField.text = updatedSettings.githubToken
-                // Force UI refresh
                 tabbedPane?.revalidate()
                 tabbedPane?.repaint()
             }

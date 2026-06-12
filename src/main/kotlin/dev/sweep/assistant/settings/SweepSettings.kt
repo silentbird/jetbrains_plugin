@@ -65,7 +65,6 @@ class SweepSettings : PersistentStateComponent<SweepSettings> {
             if (value != field) {
                 field = value // make sure you report recent data
                 notifySettingsChanged()
-                TelemetryService.getInstance().sendUsageEvent(EventType.USER_AUTHENTICATED)
             } else {
                 field = value
             }
@@ -262,14 +261,7 @@ class SweepSettings : PersistentStateComponent<SweepSettings> {
      * 2. An Anthropic API key has been provided
      */
     val hasBeenSet: Boolean
-        get() =
-            if (hasCustomAutocompleteProvider) {
-                true
-            } else if (SweepSettingsParser.isCloudEnvironment()) {
-                githubToken != DEFAULT_GITHUB_TOKEN
-            } else {
-                githubToken != DEFAULT_GITHUB_TOKEN && baseUrl != DEFAULT_SWEEP_URL
-            }
+        get() = true
 
     fun notifySettingsChanged() {
         ApplicationManager.getApplication().invokeLater {
@@ -293,10 +285,6 @@ class SweepSettings : PersistentStateComponent<SweepSettings> {
                 getInstance().callback()
             },
         )
-    }
-
-    fun initiateGitHubAuth(project: Project) {
-        GitHubAuthHandler.initiateAuth(project)
     }
 
     override fun getState(): SweepSettings = this

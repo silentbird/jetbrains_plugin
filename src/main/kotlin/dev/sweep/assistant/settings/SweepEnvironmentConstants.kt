@@ -10,24 +10,6 @@ object SweepEnvironmentConstants {
             "dev.sweep.assistant"
         }
 
-    object Messages {
-        val SETTINGS_DESCRIPTION = "<html><h3>${
-            if (IS_CLOUD_ENVIRONMENT) {
-                "Configure your settings"
-            } else {
-                "Copy these from the installation page"
-            }
-        }:</h3></html>"
-
-        val GITHUB_TOKEN_COMMENT = "<html>${
-            if (IS_CLOUD_ENVIRONMENT) {
-                """Used to validate your username"""
-            } else {
-                "Used to validate your username"
-            }
-        }</html>"
-    }
-
     object Defaults {
         val DEFAULT_BASE_URL =
             if (IS_CLOUD_ENVIRONMENT) {
@@ -35,8 +17,5 @@ object SweepEnvironmentConstants {
             } else {
                 "" // Empty string for non-cloud environment
             }
-
-        val BILLING_URL =
-            "https://app.sweep.dev/billing"
     }
 }
