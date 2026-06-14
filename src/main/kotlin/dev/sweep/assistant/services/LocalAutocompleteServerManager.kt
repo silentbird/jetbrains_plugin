@@ -8,7 +8,6 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
-import dev.sweep.assistant.agent.tools.TerminalApiWrapper
 import dev.sweep.assistant.settings.SweepSettings
 import kotlinx.coroutines.*
 import org.jetbrains.plugins.terminal.TerminalToolWindowFactory

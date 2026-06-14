@@ -145,6 +145,30 @@ class SweepSettings : PersistentStateComponent<SweepSettings> {
     val hasCustomAutocompleteProvider: Boolean
         get() = customAutocompleteUrl.isNotBlank() && customAutocompleteApiKey.isNotBlank() && customAutocompleteModel.isNotBlank()
 
+    // AI provider (OpenAI-compatible /chat/completions) used for AI features such as commit-message
+    // generation. Kept separate from the autocomplete provider so a large chat model (e.g. gpt-5.x)
+    // is never used to serve inline autocomplete.
+    var aiProviderUrl: String = ""
+        get() = field.trim().trimEnd('/')
+        set(value) {
+            field = value
+        }
+
+    var aiProviderApiKey: String = ""
+        get() = field.trim()
+        set(value) {
+            field = value
+        }
+
+    var aiProviderModel: String = ""
+        get() = field.trim()
+        set(value) {
+            field = value
+        }
+
+    val hasAiProvider: Boolean
+        get() = aiProviderUrl.isNotBlank() && aiProviderApiKey.isNotBlank() && aiProviderModel.isNotBlank()
+
     var playNotificationOnStreamEnd: Boolean = DEFAULT_PLAY_NOTIFICATION_ON_STREAM_END
         set(value) {
             field = value

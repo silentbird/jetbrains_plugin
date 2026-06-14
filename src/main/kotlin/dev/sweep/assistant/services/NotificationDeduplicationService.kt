@@ -261,26 +261,6 @@ class NotificationDeduplicationService(
         } else {
             println("Failing silently for error: ${exception.message}")
         }
-
-        // Always send error report to backend (regardless of user notification)
-        try {
-            val loggingEvent =
-                IdeaLoggingEvent(
-                    "$title: ${exception.message}",
-                    exception,
-                )
-            SweepErrorReportingService.getInstance().sendErrorReport(
-                events = arrayOf(loggingEvent),
-                additionalInfo = "Automatic error report: $errorContext\nUser-friendly title: $userFriendlyTitle\nUser-friendly content: $userFriendlyContent",
-                parentComponent = JPanel(),
-                pluginDescriptor = null,
-                showUserNotification = false,
-            )
-        } catch (reportingError: Exception) {
-            Logger
-                .getInstance(NotificationDeduplicationService::class.java)
-                .warn("Failed to send error report: ${reportingError.message}")
-        }
     }
 
     /**

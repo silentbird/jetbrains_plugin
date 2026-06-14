@@ -114,14 +114,8 @@ object SweepConstants {
     // For example tab and esc don't belong here.
     val SWEEP_ACTION_IDS_TO_DEFAULT_SHORTCUTS = emptyMap<String, List<String>>()
 
-    // Map action IDs to user-friendly names
-    val ACTION_ID_TO_NAME =
-        mapOf(
-            "dev.sweep.assistant.actions.NewChatAction" to "New Chat",
-            "dev.sweep.assistant.controllers.RightClickAction" to "Quick Actions",
-            "dev.sweep.assistant.components.ShowPromptBarAction" to "Show Prompt Bar",
-            "dev.sweep.assistant.apply.RejectCodeBlockAction" to "Reject Code Block",
-        )
+    // Map action IDs to user-friendly names (no chat actions remain to map)
+    val ACTION_ID_TO_NAME = emptyMap<String, String>()
 
     const val SWEEP_FILE_PROTOCOL = "sweep"
 

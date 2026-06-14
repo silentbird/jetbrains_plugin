@@ -8,8 +8,6 @@ import com.fasterxml.jackson.annotation.Nulls
 import com.intellij.openapi.application.PermanentInstallationID
 import dev.sweep.assistant.utils.baseNameFromPathString
 import dev.sweep.assistant.utils.getDebugInfo
-import dev.sweep.assistant.views.AppliedCodeBlock
-import dev.sweep.assistant.views.CodeBlockDisplay
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -252,12 +250,6 @@ data class AppliedCodeBlockRecord(
     val contentHash: String? = null, // this will be the hash of the contents
     val index: Int? = null, // index of codeblock in assistant response, user might not apply all blocks
     val timestamp: Long? = null,
-)
-
-data class AppliedBlockInfo(
-    val block: AppliedCodeBlock,
-    val display: CodeBlockDisplay?, // Reference to the owning display for scrolling
-    val filePath: String,
 )
 
 fun List<FullFileContentStore>.distinctFullFileContentStores(): List<FullFileContentStore> =

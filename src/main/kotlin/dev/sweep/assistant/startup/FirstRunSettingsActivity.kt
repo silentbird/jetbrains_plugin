@@ -155,19 +155,9 @@ class FirstRunSettingsActivity :
             val expectedShortcuts: List<String>,
         )
 
-        val actionsToCheck =
-            listOf(
-                ActionToCheck(
-                    "dev.sweep.assistant.actions.NewChatAction",
-                    "Open New Sweep Agent Chat",
-                    listOf("meta J", "ctrl J"),
-                ),
-                ActionToCheck(
-                    "dev.sweep.assistant.controllers.RightClickAction",
-                    "Add Selection to Sweep",
-                    listOf("meta shift J", "ctrl shift J"),
-                ),
-            )
+        // No chat actions remain in the autocomplete-only build, so there are no
+        // Cmd+J-style shortcut conflicts left to check for.
+        val actionsToCheck = emptyList<ActionToCheck>()
 
         val allConflicts = mutableListOf<ConflictInfo>()
 

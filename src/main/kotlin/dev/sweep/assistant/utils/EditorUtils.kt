@@ -16,9 +16,6 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
-import dev.sweep.assistant.components.TutorialPage
-import dev.sweep.assistant.data.SelectedSnippet
-import dev.sweep.assistant.services.SweepNonProjectFilesService
 import org.jetbrains.plugins.terminal.TerminalProjectOptionsProvider
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 import java.io.File
@@ -206,26 +203,6 @@ fun readFile(
     val maxFileSize = SweepConstants.MAX_FILE_SIZE_BYTES
     val filePath = FileUtil.toSystemIndependentName(filePath)
 
-    // Handle tutorial file first
-    if (filePath == TutorialPage.AUTOCOMPLETE_PATH || filePath == TutorialPage.CHAT_PATH) {
-        fun readTutorialContent(): String? {
-            val virtualFile = getVirtualFile(project, filePath) ?: return null
-            // TutorialVirtualFile content is set in its init block.
-            // FileDocumentManager should provide the document for this LightVirtualFile.
-            val document =
-                if (application.isReadAccessAllowed) {
-                    FileDocumentManager.getInstance().getDocument(virtualFile)
-                } else {
-                    application.runReadAction<Document?> {
-                        FileDocumentManager.getInstance().getDocument(virtualFile)
-                    }
-                }
-            return document?.let { extractTextFromDocument(it, maxLines, maxChars) }
-        }
-
-        return readTutorialContent()
-    }
-
     fun readFromEditor(): String? {
         // Add project disposal guard to prevent ContainerDisposedException
         if (project.isDisposed) {
@@ -328,8 +305,6 @@ fun relativePath(
         return project.osBasePath?.let { basePath -> relativePath(basePath, fullPath) }
     }
 
-    // Check if it's a non-project file managed by SweepNonProjectFilesService
-    if (SweepNonProjectFilesService.getInstance(project).isAllowedFile(fullPath)) return fullPath
     return project.osBasePath?.let { basePath -> relativePath(basePath, fullPath) }
 }
 
@@ -338,14 +313,12 @@ fun absolutePath(
     relativePath: String,
 ): String {
     if (File(relativePath).isAbsolute) return relativePath
-    if (relativePath == TutorialPage.AUTOCOMPLETE_PATH || relativePath == TutorialPage.CHAT_PATH) return relativePath
 
     // Add disposal check before accessing project service
     if (project.isDisposed) {
         return File(relativePath).absolutePath // Fallback to system absolute path
     }
 
-    if (SweepNonProjectFilesService.getInstance(project).isAllowedFile(relativePath)) return relativePath
     return File(project.osBasePath!!, relativePath).path
 }
 
@@ -361,16 +334,12 @@ fun getCurrentSelectedFile(project: Project): VirtualFile? {
         .filterNot {
             SweepConstants.diffFiles.contains(it.name)
         }.firstOrNull {
-            SweepNonProjectFilesService.getInstance(project).isAllowedFile(it.url) ||
-                SweepNonProjectFilesService.getInstance(project).isAllowedFile(it.path) ||
-                (
-                    it.isInLocalFileSystem &&
-                        try {
-                            VfsUtil.isAncestor(File(project.osBasePath!!).toPath().toFile(), it.toNioPath().toFile(), false)
-                        } catch (e: UnsupportedOperationException) {
-                            false
-                        }
-                )
+            it.isInLocalFileSystem &&
+                try {
+                    VfsUtil.isAncestor(File(project.osBasePath!!).toPath().toFile(), it.toNioPath().toFile(), false)
+                } catch (e: UnsupportedOperationException) {
+                    false
+                }
         }
 }
 
@@ -384,12 +353,9 @@ fun getAllOpenFiles(project: Project): List<VirtualFile> {
         .getInstance(project)
         .openFiles
         .filter {
-            SweepNonProjectFilesService.getInstance(project).isAllowedFile(it.url) ||
-                (
-                    !SweepConstants.diffFiles.contains(it.name) &&
-                        it.isInLocalFileSystem &&
-                        VfsUtil.isAncestor(File(project.osBasePath!!).toPath().toFile(), it.toNioPath().toFile(), false)
-                )
+            !SweepConstants.diffFiles.contains(it.name) &&
+                it.isInLocalFileSystem &&
+                VfsUtil.isAncestor(File(project.osBasePath!!).toPath().toFile(), it.toNioPath().toFile(), false)
         }
 }
 
@@ -405,34 +371,6 @@ fun getAllOpenFilePaths(
                 file.path
             }
         }
-
-fun getCurrentSelectedSnippet(project: Project): Pair<SelectedSnippet, String>? {
-    val application = ApplicationManager.getApplication()
-
-    fun inner(): Pair<SelectedSnippet, String>? {
-        val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return null
-        val document = editor.document
-        val file = FileDocumentManager.getInstance().getFile(document) ?: return null
-        val relativePath = relativePath(project, file) ?: return null
-
-        return editor.selectionModel.takeIf { it.hasSelection() }?.run {
-            Pair(
-                SelectedSnippet(
-                    file.name,
-                    document.getLineNumber(selectionStart) + 1,
-                    document.getLineNumber(selectionEnd) + 1,
-                ),
-                relativePath,
-            )
-        }
-    }
-
-    return if (application.isReadAccessAllowed) {
-        inner()
-    } else {
-        application.runReadAction<Pair<SelectedSnippet, String>?> { inner() }
-    }
-}
 
 fun foldEditorOutside(
     startLine: Int,
@@ -534,25 +472,18 @@ fun openFileInEditor(
                 return
             }
 
-            // Check if it's a non-project file first
-            val nonProjectService = SweepNonProjectFilesService.getInstance(project)
-            if (nonProjectService.isAllowedFile(relativePath)) {
-                // It's a non-project file, get it using the service
-                nonProjectService.getVirtualFileAssociatedWithAllowedFile(project, relativePath)
-            } else {
-                // It's a regular project file, use the existing approach
-                val basePath = project.basePath ?: return
+            // Regular project file
+            val basePath = project.basePath ?: return
 
-                val absolutePath =
-                    getAbsolutePathFromUri(relativePath) ?: run {
-                        if (!File(relativePath).isAbsolute) {
-                            Paths.get(basePath, relativePath).toString()
-                        } else {
-                            relativePath
-                        }
+            val absolutePath =
+                getAbsolutePathFromUri(relativePath) ?: run {
+                    if (!File(relativePath).isAbsolute) {
+                        Paths.get(basePath, relativePath).toString()
+                    } else {
+                        relativePath
                     }
-                LocalFileSystem.getInstance().findFileByPath(absolutePath)
-            }
+                }
+            LocalFileSystem.getInstance().findFileByPath(absolutePath)
         } ?: return // Return if virtual file not found in either case
 
     ApplicationManager.getApplication().invokeLater {

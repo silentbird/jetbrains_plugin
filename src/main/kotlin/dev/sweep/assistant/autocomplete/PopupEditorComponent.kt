@@ -1,4 +1,4 @@
-package dev.sweep.assistant.views
+package dev.sweep.assistant.autocomplete
 
 import com.intellij.codeInsight.completion.CompletionService
 import com.intellij.openapi.Disposable

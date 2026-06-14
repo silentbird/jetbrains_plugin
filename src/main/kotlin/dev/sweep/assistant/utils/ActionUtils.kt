@@ -9,7 +9,6 @@ import com.intellij.openapi.editor.event.EditorMouseEvent
 import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
-import dev.sweep.assistant.controllers.TerminalManagerService
 import javax.swing.KeyStroke
 
 fun isTerminalContext(e: AnActionEvent): Boolean {
@@ -21,17 +20,6 @@ fun isTerminalEditor(e: EditorMouseEvent): Boolean =
     e.editor.virtualFile
         ?.fileType
         ?.name == null
-
-fun isTerminalFocused(
-    e: AnActionEvent,
-    project: Project,
-): Boolean {
-    val activeTerminalPanel = TerminalManagerService.getInstance(project).getActiveTerminalPanel()
-    if (activeTerminalPanel != null) {
-        return activeTerminalPanel.hasFocus() && activeTerminalPanel.isVisible && activeTerminalPanel.isFocusOwner
-    }
-    return false
-}
 
 fun isValidSelection(text: String?): Boolean {
     if (text.isNullOrBlank()) return false

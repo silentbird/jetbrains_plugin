@@ -1,4 +1,4 @@
-package dev.sweep.assistant.agent.tools
+package dev.sweep.assistant.services
 
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project

@@ -38,34 +38,35 @@ import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 
 @Serializable
-private data class OpenAIChatMessage(
+internal data class OpenAIChatMessage(
     val role: String,
     val content: String,
 )
 
 @Serializable
-private data class OpenAIChatCompletionRequest(
+internal data class OpenAIChatCompletionRequest(
     val model: String,
     val messages: List<OpenAIChatMessage>,
-    val temperature: Double = 0.0,
-    @SerialName("max_tokens")
-    val maxTokens: Int = 256,
+    // Newer OpenAI models (gpt-5 / o-series) reject `max_tokens` and any non-default `temperature`.
+    // We therefore send `max_completion_tokens` and omit `temperature` entirely (server default).
+    @SerialName("max_completion_tokens")
+    val maxCompletionTokens: Int = 256,
     val stream: Boolean = false,
 )
 
 @Serializable
-private data class OpenAIChatCompletionResponse(
+internal data class OpenAIChatCompletionResponse(
     val choices: List<OpenAIChoice> = emptyList(),
 )
 
 @Serializable
-private data class OpenAIChoice(
+internal data class OpenAIChoice(
     val message: OpenAIChatResponseMessage? = null,
     val text: String? = null,
 )
 
 @Serializable
-private data class OpenAIChatResponseMessage(
+internal data class OpenAIChatResponseMessage(
     val content: String? = null,
 )
 
@@ -127,14 +128,21 @@ class AutocompleteIpResolverService(
     suspend fun fetchNextEditAutocomplete(request: NextEditAutocompleteRequest): NextEditAutocompleteResponse? {
         return try {
             val isLocalMode = SweepConfig.getInstance(project).isAutocompleteLocalMode()
-            if (isLocalMode) {
-                LocalAutocompleteServerManager.getInstance().ensureServerRunning()
-            }
 
-            if (!isLocalMode && SweepSettings.getInstance().hasCustomAutocompleteProvider) {
-                fetchCustomNextEditAutocomplete(request)
-            } else {
-                val postData = encodeString(request, NextEditAutocompleteRequest.serializer())
+            when {
+                !isLocalMode && SweepSettings.getInstance().hasCustomAutocompleteProvider ->
+                    fetchCustomNextEditAutocomplete(request)
+
+                !isLocalMode -> {
+                    // No fallback to Sweep's hosted autocomplete: cloud autocomplete requires a
+                    // user-configured OpenAI-compatible endpoint (enable local mode otherwise).
+                    logger.debug("No autocomplete backend configured (enable local mode or set a custom endpoint)")
+                    null
+                }
+
+                else -> {
+                    LocalAutocompleteServerManager.getInstance().ensureServerRunning()
+                    val postData = encodeString(request, NextEditAutocompleteRequest.serializer())
                 val postDataBytes = postData.toByteArray(Charsets.UTF_8)
 
                 // Try to compress the request data
@@ -234,7 +242,8 @@ class AutocompleteIpResolverService(
                     }
                 }
 
-                result
+                    result
+                }
             }
         } catch (e: Exception) {
             logger.warn("Error fetching next edit autocomplete: ${e.message}")
@@ -427,26 +436,16 @@ class AutocompleteIpResolverService(
     }
 
     init {
-        startPeriodicResolution()
-        startPeriodicHealthCheck()
+        // No background DNS resolution or health-checks against Sweep's hosted service:
+        // autocomplete is served only by the local server or a user-configured endpoint.
     }
 
     /**
-     * Gets the base URL using the configured backend URL or autocomplete.sweep.dev.
+     * Base URL for the NextEdit-protocol backend. Only the local autocomplete server speaks this
+     * protocol now (the custom OpenAI-compatible endpoint is handled separately), so this always
+     * points at the local server.
      */
-    fun getBaseUrl(): String {
-        if (SweepConfig.getInstance(project).isAutocompleteLocalMode()) {
-            return LocalAutocompleteServerManager.getInstance().getServerUrl()
-        }
-
-        if (!isPointedToCloud()) {
-            // Use the configured backend URL when not pointed to cloud
-            return SweepSettings.getInstance().baseUrl
-        }
-
-        // Always use https://autocomplete.sweep.dev directly, let OS handle DNS caching
-        return "https://autocomplete.sweep.dev"
-    }
+    fun getBaseUrl(): String = LocalAutocompleteServerManager.getInstance().getServerUrl()
 
     /**
      * Gets the last measured latency in milliseconds.

@@ -4,7 +4,6 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
-import dev.sweep.assistant.views.RevertBeforeRewriteConfirmation
 
 @State(name = "SweepMetaData", storages = [Storage("SweepMetaData.xml")])
 class SweepMetaData : PersistentStateComponent<SweepMetaData.MetaData> {
@@ -60,8 +59,6 @@ class SweepMetaData : PersistentStateComponent<SweepMetaData.MetaData> {
         var hasPrivacyModeBeenUpdatedFromProject: Boolean = false,
         // Whether to skip confirmation dialog when reverting changes
         var skipRevertConfirmation: Boolean = false,
-        // How to handle confirmation dialog when reverting before rewriting
-        var skipRevertBeforeRewriteConfirmation: RevertBeforeRewriteConfirmation = RevertBeforeRewriteConfirmation.ASK_ALWAYS,
         // Cache for allowed models from backend
         var cachedModels: String? = null,
         var cachedDefaultModel: String? = null,
@@ -318,12 +315,6 @@ class SweepMetaData : PersistentStateComponent<SweepMetaData.MetaData> {
         get() = metaData.skipRevertConfirmation
         set(value) {
             metaData.skipRevertConfirmation = value
-        }
-
-    var skipRevertBeforeRewriteConfirmation: RevertBeforeRewriteConfirmation
-        get() = metaData.skipRevertBeforeRewriteConfirmation
-        set(value) {
-            metaData.skipRevertBeforeRewriteConfirmation = value
         }
 
     var cachedModels: String?

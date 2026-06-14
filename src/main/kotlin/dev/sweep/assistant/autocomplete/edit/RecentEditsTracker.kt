@@ -745,11 +745,7 @@ class RecentEditsTracker(
         val currentTime = System.currentTimeMillis()
         val isRecentFileSwitch = currentTime - lastEditTime < FILE_SWITCH_MOVEMENT_THRESHOLD
         val isTutorialFile = getVirtualFileFromEditor(newEditor)?.name?.endsWith("tutorial.py") == true
-        if ((isRecentFileSwitch || isTutorialFile) &&
-            !AgentChangeTrackingService
-                .getInstance(project)
-                .wasLastChangeByAgent(lastEditTime)
-        ) {
+        if (isRecentFileSwitch || isTutorialFile) {
             scheduleAutocompleteWithPrefetch()
         }
     }
@@ -909,11 +905,7 @@ class RecentEditsTracker(
 
                         lastDocumentText = newText
 
-                        // Don't schedule autocomplete if the last change was made by the agent
-                        val lastEditTime = recentEdits.lastOrNull()?.timestamp ?: 0
-                        if (!AgentChangeTrackingService.getInstance(project).wasLastChangeByAgent(lastEditTime)) {
-                            scheduleAutocompleteWithPrefetch()
-                        }
+                        scheduleAutocompleteWithPrefetch()
                     }
                 }
             }.also {
@@ -1080,9 +1072,7 @@ class RecentEditsTracker(
                 val cursorTrackingOrTutorialActive =
                     currentTime - lastEditTime < cursorMovementThreshold ||
                         getVirtualFileFromEditor(editor)?.name?.endsWith("tutorial.py") == true
-                if (cursorTrackingOrTutorialActive &&
-                    !AgentChangeTrackingService.getInstance(project).wasLastChangeByAgent(lastEditTime)
-                ) {
+                if (cursorTrackingOrTutorialActive) {
                     scheduleAutocompleteWithPrefetch()
                 }
             }.also {
@@ -1795,30 +1785,9 @@ class RecentEditsTracker(
     }
 
     private fun isAppliedCodeBlockActive(): Boolean {
-        val promptBarService = PromptBarService.getInstance(project)
-        val cmdKActive = promptBarService.isPromptBarActive() || promptBarService.areActionsVisible()
-
-        if (FeatureFlagService.getInstance(project).isFeatureEnabled("enable_autocomplete_when_code_blocks_present")) {
-            // new way: only disable this while code blocks are actively being applied
-            val isApplyingBlocks = AppliedCodeBlockManager.getInstance(project).isApplyingCodeBlocksToCurrentFile()
-            return cmdKActive || isApplyingBlocks
-        } else {
-            // old way: check for applied code blocks only in the current file
-            val currentEditor = getCurrentEditor()
-            val hasAppliedBlocksInCurrentFile =
-                if (currentEditor != null) {
-                    val currentFilePath = getVirtualFileFromEditor(currentEditor)?.path
-                    if (currentFilePath != null) {
-                        val relativePath = relativePath(project, currentFilePath) ?: currentFilePath
-                        AppliedCodeBlockManager.getInstance(project).hasBlocksForFile(relativePath)
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            return hasAppliedBlocksInCurrentFile || cmdKActive
-        }
+        // The autocomplete-only build has no agent-applied code blocks or inline-edit prompt bar,
+        // so autocomplete is never suppressed by them.
+        return false
     }
 
     private fun hasMultiLineSelection(): Boolean {

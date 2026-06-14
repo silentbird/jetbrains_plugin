@@ -20,16 +20,20 @@ import com.intellij.serviceContainer.AlreadyDisposedException
 import com.intellij.util.messages.MessageBusConnection
 import com.intellij.vcs.commit.*
 import dev.sweep.assistant.components.SweepConfig
-import dev.sweep.assistant.data.CommitMessageRequest
+import dev.sweep.assistant.settings.SweepSettings
 import dev.sweep.assistant.utils.PartialChangeInfo
+import dev.sweep.assistant.utils.defaultJson
+import dev.sweep.assistant.utils.encodeString
 import dev.sweep.assistant.utils.generateCombinedDiffString
 import dev.sweep.assistant.utils.generateDiffStringFromChanges
 import dev.sweep.assistant.utils.generateDiffStringFromUnversionedFiles
-import dev.sweep.assistant.utils.getConnection
 import dev.sweep.assistant.utils.getCurrentBranchName
 import dev.sweep.assistant.utils.getRecentCommitMessages
-import kotlinx.serialization.json.Json
-import java.net.HttpURLConnection
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.CancellationException
 import java.util.concurrent.Future
@@ -43,6 +47,12 @@ class SweepCommitMessageService(
     private var lastUpdateTime: Long = 0
     private var messageBusConnection: MessageBusConnection? = null
     private val runningTasks = mutableListOf<Future<*>>()
+
+    private val httpClient: HttpClient =
+        HttpClient
+            .newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build()
 
     init {
         messageBusConnection = project.messageBus.connect(this) // Connect with disposable
@@ -229,43 +239,76 @@ class SweepCommitMessageService(
                 null
             }
 
-        var commitMessage = ""
-        try {
-            var connection: HttpURLConnection? = null
-            try {
-                connection = getConnection("backend/create_commit_message")
-
-                // Set timeouts to prevent hanging
-                connection.connectTimeout = 10000 // 10 seconds
-                connection.readTimeout = 30000 // 30 seconds
-
-                val commitMessageRequest =
-                    CommitMessageRequest(
-                        context = diffString,
-                        previous_commits = previousCommitsString,
-                        branch = currentBranch ?: "",
-                        commit_template = commitTemplate,
-                    )
-                val json = Json { encodeDefaults = true }
-                val postData = json.encodeToString(CommitMessageRequest.serializer(), commitMessageRequest)
-
-                connection.outputStream.use { os ->
-                    os.write(postData.toByteArray())
-                    os.flush()
-                }
-
-                val response = connection.inputStream.bufferedReader().use { it.readText() }
-                val newCommitMessage = json.decodeFromString<Map<String, String>>(response)["commit_message"]
-
-                commitMessage = newCommitMessage.toString()
-            } finally {
-                connection?.disconnect()
-            }
-        } catch (e: Exception) {
-            logger.warn("Failed to generate commit message", e)
+        val settings = SweepSettings.getInstance()
+        if (!settings.hasAiProvider) {
+            logger.debug("No AI provider configured; skipping commit message generation")
+            return ""
         }
 
-        return commitMessage.trim()
+        val systemPrompt =
+            buildString {
+                append(
+                    "You are a commit message generator. Given a git diff, write a single concise commit message. " +
+                        "Return ONLY the commit message text, with no surrounding quotes, code fences, or explanation.",
+                )
+                if (!commitTemplate.isNullOrBlank()) {
+                    append("\n\nFollow these commit message rules:\n").append(commitTemplate)
+                }
+            }
+        val userPrompt =
+            buildString {
+                currentBranch?.let { append("Branch: ").append(it).append("\n\n") }
+                if (previousCommitsString.isNotBlank()) append(previousCommitsString).append("\n\n")
+                append("Git diff:\n").append(diffString)
+            }
+
+        return try {
+            val requestBody =
+                encodeString(
+                    OpenAIChatCompletionRequest(
+                        model = settings.aiProviderModel,
+                        messages =
+                            listOf(
+                                OpenAIChatMessage(role = "system", content = systemPrompt),
+                                OpenAIChatMessage(role = "user", content = userPrompt),
+                            ),
+                        maxCompletionTokens = 512,
+                    ),
+                    OpenAIChatCompletionRequest.serializer(),
+                )
+            val httpRequest =
+                HttpRequest
+                    .newBuilder()
+                    .uri(URI.create(customChatCompletionsEndpoint(settings.aiProviderUrl)))
+                    .timeout(Duration.ofSeconds(30))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json")
+                    .header("Authorization", "Bearer ${settings.aiProviderApiKey}")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build()
+            val response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(Charsets.UTF_8))
+            if (response.statusCode() !in 200..299) {
+                logger.warn("Commit message provider returned HTTP ${response.statusCode()}: ${response.body()}")
+                return ""
+            }
+            val chatResponse = defaultJson.decodeFromString<OpenAIChatCompletionResponse>(response.body())
+            chatResponse.choices
+                .firstNotNullOfOrNull { it.message?.content ?: it.text }
+                ?.trim()
+                .orEmpty()
+        } catch (e: Exception) {
+            logger.warn("Failed to generate commit message via custom provider", e)
+            ""
+        }
+    }
+
+    private fun customChatCompletionsEndpoint(configuredUrl: String): String {
+        val url = configuredUrl.trim().trimEnd('/')
+        return when {
+            url.endsWith("/chat/completions") -> url
+            url.endsWith("/v1") -> "$url/chat/completions"
+            else -> "$url/v1/chat/completions"
+        }
     }
 
     companion object {
