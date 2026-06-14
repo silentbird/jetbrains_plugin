@@ -9,6 +9,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import dev.sweep.assistant.autocomplete.edit.NextEditAutocompleteRequest
 import dev.sweep.assistant.autocomplete.edit.NextEditAutocompleteResponse
+import dev.sweep.assistant.autocomplete.edit.NextEditAutocompletion
 import dev.sweep.assistant.components.SweepConfig
 import dev.sweep.assistant.settings.SweepSettings
 import dev.sweep.assistant.settings.SweepSettingsParser
@@ -35,6 +36,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
 @Serializable
@@ -70,6 +72,29 @@ internal data class OpenAIChatResponseMessage(
     val content: String? = null,
 )
 
+// Raw text-completion (/v1/completions) types, used for self-hosted NextEdit models
+// (e.g. sweep-next-edit-v2-7B served by vLLM/sglang).
+@Serializable
+internal data class OpenAICompletionRequest(
+    val model: String,
+    val prompt: String,
+    @SerialName("max_tokens")
+    val maxTokens: Int = 1024,
+    val temperature: Double = 0.0,
+    val stop: List<String> = emptyList(),
+    val stream: Boolean = false,
+)
+
+@Serializable
+internal data class OpenAICompletionResponse(
+    val choices: List<OpenAICompletionChoice> = emptyList(),
+)
+
+@Serializable
+internal data class OpenAICompletionChoice(
+    val text: String? = null,
+)
+
 /**
  * Service that periodically resolves the IP address of autocomplete.sweep.dev
  * to keep DNS cache warm while using HTTPS with the domain name directly.
@@ -84,6 +109,9 @@ class AutocompleteIpResolverService(
         fun getInstance(project: Project): AutocompleteIpResolverService = project.getService(AutocompleteIpResolverService::class.java)
 
         private const val HOSTNAME = "autocomplete.sweep.dev"
+
+        // Stop tokens for the NextEdit model (sweep-next-edit-v2-7B).
+        private val STOP_TOKENS = listOf("<|file_sep|>", "<|endoftext|>")
         private const val RESOLUTION_INTERVAL_MS = 15_000L
         private const val HEALTH_CHECK_INTERVAL_MS = 25_000L // Just under 30 seconds
         private const val READ_TIMEOUT_MS = 10_000L
@@ -263,22 +291,17 @@ class AutocompleteIpResolverService(
                 return@withContext null
             }
 
-            val prompt = buildCustomAutocompletePrompt(request)
+            val built = buildNextEditPrompt(request)
             val requestBody =
                 encodeString(
-                    OpenAIChatCompletionRequest(
+                    OpenAICompletionRequest(
                         model = model,
-                        messages =
-                            listOf(
-                                OpenAIChatMessage(
-                                    role = "system",
-                                    content =
-                                        "You are a code autocomplete engine. Return only a JSON object with a completion field.",
-                                ),
-                                OpenAIChatMessage(role = "user", content = prompt),
-                            ),
+                        prompt = built.prompt,
+                        maxTokens = 1024,
+                        temperature = 0.0,
+                        stop = STOP_TOKENS,
                     ),
-                    OpenAIChatCompletionRequest.serializer(),
+                    OpenAICompletionRequest.serializer(),
                 )
 
             val httpRequest =
@@ -297,142 +320,197 @@ class AutocompleteIpResolverService(
                 httpClient
                     .sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString(Charsets.UTF_8))
                     .await()
-                    .raiseForStatus()
+            if (response.statusCode() !in 200..299) {
+                logger.warn("Custom autocomplete provider returned HTTP ${response.statusCode()}: ${response.body()}")
+                return@withContext null
+            }
 
-            val body = response.body()
-            val chatResponse = defaultJson.decodeFromString<OpenAIChatCompletionResponse>(body)
-            val content =
-                chatResponse.choices.firstNotNullOfOrNull { choice ->
-                    choice.message?.content ?: choice.text
-                } ?: return@withContext null
+            val completionResponse = defaultJson.decodeFromString<OpenAICompletionResponse>(response.body())
+            val completion = completionResponse.choices.firstNotNullOfOrNull { it.text } ?: return@withContext null
 
-            parseCustomAutocompleteResponse(request, content)
+            buildNextEditResponse(request, built, completion)
         }
 
     private fun getCustomAutocompleteEndpoint(configuredUrl: String): String {
         val url = configuredUrl.trim().trimEnd('/')
         return when {
-            url.endsWith("/chat/completions") -> url
-            url.endsWith("/v1") -> "$url/chat/completions"
-            else -> "$url/v1/chat/completions"
+            url.endsWith("/completions") && !url.endsWith("/chat/completions") -> url
+            url.endsWith("/v1") -> "$url/completions"
+            else -> "$url/v1/completions"
         }
     }
 
-    private fun buildCustomAutocompletePrompt(request: NextEditAutocompleteRequest): String {
-        val cursor = request.cursor_position.coerceIn(0, request.file_contents.length)
-        val prefix = request.file_contents.substring(0, cursor).takeLast(12_000)
-        val suffix = request.file_contents.substring(cursor).take(4_000)
-        val recentChanges = request.recent_changes_high_res.ifBlank { request.recent_changes }.takeLast(4_000)
-        val retrievalContext =
-            (request.file_chunks + request.retrieval_chunks)
-                .take(8)
-                .joinToString("\n\n") { chunk ->
-                    "File: ${chunk.file_path}:${chunk.start_line}-${chunk.end_line}\n${chunk.content.take(2_000)}"
-                }
+    private data class BuiltNextEditPrompt(
+        val prompt: String,
+        val codeBlock: String,
+        val blockStartIndex: Int,
+        val prefill: String,
+    )
 
-        return """
-            Complete the code at the cursor.
-            Return exactly one JSON object:
-            {"completion":"text to insert at the cursor","confidence":0.0}
+    /**
+     * Builds the NextEdit model prompt. Ported from sweepai/sweep-next-edit-v2-7B `inference.py`
+     * (`build_prompt` + `compute_prefill`): a `<|file_sep|>`-delimited prompt with surrounding file
+     * context, retrieval chunks, recent changes, the cursor code block (with a `<|cursor|>` marker),
+     * and a prefill that seeds the `updated/` section.
+     */
+    private fun buildNextEditPrompt(request: NextEditAutocompleteRequest): BuiltNextEditPrompt {
+        val fileContents = request.file_contents
+        val cursorPosition = request.cursor_position.coerceIn(0, fileContents.length)
+        val lines = splitKeepEnds(fileContents)
 
-            Requirements:
-            - The completion must be only the inserted text, not the whole file.
-            - Do not include markdown fences or explanations.
-            - Prefer a short, high-confidence completion.
-            - Use empty string if no useful completion is available.
+        // Find the line containing the cursor
+        var pos = 0
+        var cursorLine = if (lines.isEmpty()) 0 else lines.size - 1
+        for (i in lines.indices) {
+            if (pos + lines[i].length > cursorPosition) {
+                cursorLine = i
+                break
+            }
+            pos += lines[i].length
+        }
 
-            Current file: ${request.file_path}
-            Cursor offset: $cursor
+        val numLinesBefore = 10
+        val numLinesAfter = 10
+        val blockStart = maxOf(0, cursorLine - numLinesBefore)
+        val blockEnd = minOf(lines.size, cursorLine + numLinesAfter + 1)
+        val codeBlock = lines.subList(blockStart, blockEnd).joinToString("")
+        val blockStartIndex = lines.subList(0, blockStart).sumOf { it.length }
+        val relativeCursor = (cursorPosition - blockStartIndex).coerceIn(0, codeBlock.length)
 
-            Text before cursor:
-            $prefix
+        val codeBlockWithCursor =
+            codeBlock.substring(0, relativeCursor) + "<|cursor|>" + codeBlock.substring(relativeCursor)
+        val prevSection = codeBlock
+        val prefill = computePrefill(codeBlock, relativeCursor, request.changes_above_cursor)
 
-            Text after cursor:
-            $suffix
+        val contextStart = maxOf(0, cursorLine - 150)
+        val contextEnd = minOf(lines.size, cursorLine + 150)
+        val initialFile = lines.subList(contextStart, contextEnd).joinToString("")
 
-            Recent user changes:
-            $recentChanges
+        val retrievalResults =
+            request.retrieval_chunks.joinToString("") { "\n<|file_sep|>${it.file_path}\n${it.content}\n" }
 
-            Related context:
-            $retrievalContext
-        """.trimIndent()
+        val startLine = blockStart + 1
+        val endLine = blockEnd
+        val filePath = request.file_path
+
+        // TODO(autocomplete #1): request.recent_changes is in the plugin's "File: path\n<diff>"
+        // format, not the model's original:/updated: DIFF_FORMAT. See AUTOCOMPLETE_TODO.md.
+        var formatted =
+            "<|file_sep|>$filePath\n" +
+                "$initialFile$retrievalResults\n" +
+                "${request.recent_changes}\n" +
+                "<|file_sep|>original/$filePath:$startLine:$endLine\n" +
+                "$prevSection\n" +
+                "<|file_sep|>current/$filePath:$startLine:$endLine\n" +
+                "$codeBlockWithCursor\n" +
+                "<|file_sep|>updated/$filePath:$startLine:$endLine\n" +
+                prefill
+
+        if (request.file_chunks.isNotEmpty()) {
+            formatted =
+                request.file_chunks.joinToString("") { "<|file_sep|>${it.file_path}\n${it.content}\n" } + formatted
+        }
+
+        return BuiltNextEditPrompt(formatted, codeBlock, blockStartIndex, prefill)
     }
 
-    private fun parseCustomAutocompleteResponse(
+    /**
+     * Ported from `inference.py` `compute_prefill`. Seeds the `updated/` section so the model only
+     * generates from the edit point onward.
+     */
+    private fun computePrefill(
+        codeBlock: String,
+        relativeCursor: Int,
+        changesAboveCursor: Boolean,
+    ): String =
+        if (changesAboveCursor) {
+            // Insertion mode: prefill only the first line + trailing blank lines.
+            val prefilledLines = splitKeepEnds(codeBlock.substring(0, relativeCursor))
+            var beforeSplit = prefilledLines.take(1).joinToString("")
+            val afterSplit = prefilledLines.drop(1).joinToString("")
+            for (ch in afterSplit) {
+                if (ch == '\n') beforeSplit += "\n" else break
+            }
+            beforeSplit
+        } else {
+            // Default mode: prefill everything up to the cursor's line.
+            val prefixBeforeCursor = codeBlock.substring(0, relativeCursor)
+            if (!prefixBeforeCursor.contains('\n')) {
+                ""
+            } else {
+                codeBlock.substring(0, prefixBeforeCursor.lastIndexOf('\n') + 1)
+            }
+        }
+
+    /** Splits text into lines keeping the line terminators (like Python's splitlines(keepends=True)). */
+    private fun splitKeepEnds(text: String): List<String> {
+        if (text.isEmpty()) return emptyList()
+        val result = mutableListOf<String>()
+        val sb = StringBuilder()
+        for (ch in text) {
+            sb.append(ch)
+            if (ch == '\n') {
+                result.add(sb.toString())
+                sb.setLength(0)
+            }
+        }
+        if (sb.isNotEmpty()) result.add(sb.toString())
+        return result
+    }
+
+    /**
+     * Turns the model's predicted `updated/` code block into a [NextEditAutocompleteResponse] that
+     * replaces the original cursor code block. Indices are returned as code-point (Python-style)
+     * offsets because the caller applies `convertPythonToKotlinIndex` (adjustIndices) before use.
+     */
+    private fun buildNextEditResponse(
         request: NextEditAutocompleteRequest,
-        content: String,
+        built: BuiltNextEditPrompt,
+        rawCompletion: String,
     ): NextEditAutocompleteResponse? {
-        val cleaned = stripMarkdownFence(content)
-        val parsedObject =
-            runCatching {
-                defaultJson.parseToJsonElement(cleaned.trim()) as? JsonObject
-            }.getOrNull()
+        // Strip any stop tokens the server didn't already remove.
+        var completion = rawCompletion
+        for (stop in STOP_TOKENS) {
+            val idx = completion.indexOf(stop)
+            if (idx >= 0) completion = completion.substring(0, idx)
+        }
 
-        val completion =
-            parsedObject
-                ?.get("completion")
-                ?.jsonPrimitive
-                ?.contentOrNull
-                ?: cleaned.trim()
+        val updatedBlock = built.prefill + completion
+        if (updatedBlock == built.codeBlock || updatedBlock.trim() == built.codeBlock.trim()) {
+            return null // no-op prediction
+        }
 
-        if (completion.isEmpty()) return null
+        // TODO(autocomplete #2): port inference.py is_pure_insertion_above_cursor to reject
+        // low-value "insert above cursor only" predictions. See AUTOCOMPLETE_TODO.md.
 
-        val startIndex =
-            parsedObject
-                ?.get("start_index")
-                ?.jsonPrimitive
-                ?.intOrNull
-                ?: request.cursor_position
-        val endIndex =
-            parsedObject
-                ?.get("end_index")
-                ?.jsonPrimitive
-                ?.intOrNull
-                ?: request.cursor_position
-        val confidence =
-            parsedObject
-                ?.get("confidence")
-                ?.jsonPrimitive
-                ?.floatOrNull
-                ?: 0.7f
-        val autocompleteId =
-            parsedObject
-                ?.get("autocomplete_id")
-                ?.jsonPrimitive
-                ?.contentOrNull
-                ?: "custom-${System.currentTimeMillis()}"
+        val fileContents = request.file_contents
+        val startKotlin = built.blockStartIndex.coerceIn(0, fileContents.length)
+        val endKotlin = (built.blockStartIndex + built.codeBlock.length).coerceIn(startKotlin, fileContents.length)
+
+        // Express offsets as code-point counts so adjustIndices() restores the correct UTF-16 offsets.
+        val startCp = fileContents.codePointCount(0, startKotlin)
+        val endCp = fileContents.codePointCount(0, endKotlin)
+        // TODO(autocomplete #3): /v1/completions returns no confidence; hardcoded. See AUTOCOMPLETE_TODO.md.
+        val confidence = 1.0f
+        val autocompleteId = UUID.randomUUID().toString()
 
         return NextEditAutocompleteResponse(
-            start_index = startIndex,
-            end_index = endIndex,
-            completion = completion,
+            start_index = startCp,
+            end_index = endCp,
+            completion = updatedBlock,
             confidence = confidence,
             autocomplete_id = autocompleteId,
             completions =
                 listOf(
-                    dev.sweep.assistant.autocomplete.edit.NextEditAutocompletion(
-                        start_index = startIndex,
-                        end_index = endIndex,
-                        completion = completion,
+                    NextEditAutocompletion(
+                        start_index = startCp,
+                        end_index = endCp,
+                        completion = updatedBlock,
                         confidence = confidence,
                         autocomplete_id = autocompleteId,
                     ),
                 ),
         )
-    }
-
-    private fun stripMarkdownFence(text: String): String {
-        val trimmed = text.trim()
-        if (!trimmed.startsWith("```")) return text
-
-        val lines = trimmed.lines().toMutableList()
-        if (lines.isNotEmpty() && lines.first().trim().startsWith("```")) {
-            lines.removeAt(0)
-        }
-        if (lines.isNotEmpty() && lines.last().trim().startsWith("```")) {
-            lines.removeAt(lines.lastIndex)
-        }
-        return lines.joinToString("\n")
     }
 
     init {
