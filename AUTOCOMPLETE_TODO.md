@@ -44,13 +44,20 @@ ports Sweep's `inference.py` (`build_prompt` / `compute_prefill`) and calls the 
   downstream confidence-based filtering/UX is effectively disabled for the custom path.
 - **Fix:** request `logprobs` from the server and derive a confidence, or expose a setting.
 
-## 4. Not end-to-end tested  (priority: HIGH — do first)
+## 4. End-to-end tested — works, but rendering UX needs polish  (priority: MEDIUM)
 
-- The NextEdit `/v1/completions` path was verified to compile and build, but never run against a
-  real deployed `sweep-next-edit-v2-7B` endpoint. Deploy via
-  `python3 -m sglang.launch_server --model-path henrik3/sweep-next-edit-v2-7B-AWQ --port 8000 --host 0.0.0.0 --trust-remote-code --context-length 16384`,
-  set the Autocomplete endpoint to `http://<host>:8000/v1`, then validate. On failure, the path
-  logs the HTTP status + body and the prompt can be inspected.
+- The NextEdit `/v1/completions` path was validated against a real self-hosted model (LM Studio /
+  vLLM serving `sweep-next-edit-v2-7B-GGUF/AWQ`). Completions are produced and shown.
+- `buildNextEditResponse` reduces the whole-block prediction to the minimal changed span by trimming
+  common leading/trailing **whole lines** (line-aligned, not char-level — char-level made clean
+  line insertions look like replacements and forced the popup).
+- **Remaining UX issue:** pure insertions / within-line edits render as inline ghost text, but
+  multi-line *replacements* (and multi-line insertions when the caret isn't at a line boundary) fall
+  back to the popup (`PopupSuggestion`) via `getGhostTextOrNull` returning null — see
+  `AutocompleteSuggestion.fromAutocompleteResponse` / `getGhostTextOrNull` (the `caretAtNewline` /
+  newline guard at ~line 1058, and `MIN_JUMP_DISTANCE=8`). The model frequently predicts multi-line
+  edits, so popups appear often → "experience slightly poor". To improve, reshape the response so
+  more predictions qualify as ghost text, or relax the renderer's ghost-text conditions.
 
 ---
 

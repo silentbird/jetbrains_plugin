@@ -484,8 +484,33 @@ class AutocompleteIpResolverService(
         // low-value "insert above cursor only" predictions. See AUTOCOMPLETE_TODO.md.
 
         val fileContents = request.file_contents
-        val startKotlin = built.blockStartIndex.coerceIn(0, fileContents.length)
-        val endKotlin = (built.blockStartIndex + built.codeBlock.length).coerceIn(startKotlin, fileContents.length)
+        val codeBlock = built.codeBlock
+
+        // Reduce the whole-block replacement to the minimal changed span by trimming common leading
+        // and trailing *whole lines*. This keeps the region line-aligned and moves start_index next
+        // to the actual change (so the renderer treats it as a near-cursor inline edit, not a distant
+        // "jump"). Char-level trimming would split mid-line and make a clean line insertion look like
+        // a replacement, which forces the popup instead of inline ghost text.
+        val oldLines = splitKeepEnds(codeBlock)
+        val newLines = splitKeepEnds(updatedBlock)
+        var lead = 0
+        while (lead < minOf(oldLines.size, newLines.size) && oldLines[lead] == newLines[lead]) lead++
+        var trail = 0
+        while (trail < minOf(oldLines.size, newLines.size) - lead &&
+            oldLines[oldLines.size - 1 - trail] == newLines[newLines.size - 1 - trail]
+        ) {
+            trail++
+        }
+        val prefixLen = oldLines.take(lead).sumOf { it.length }
+        val suffixLen = oldLines.takeLast(trail).sumOf { it.length }
+
+        val startKotlin = (built.blockStartIndex + prefixLen).coerceIn(0, fileContents.length)
+        val endKotlin = (built.blockStartIndex + codeBlock.length - suffixLen).coerceIn(startKotlin, fileContents.length)
+        val replacement =
+            updatedBlock.substring(
+                prefixLen.coerceAtMost(updatedBlock.length),
+                (updatedBlock.length - suffixLen).coerceIn(prefixLen.coerceAtMost(updatedBlock.length), updatedBlock.length),
+            )
 
         // Express offsets as code-point counts so adjustIndices() restores the correct UTF-16 offsets.
         val startCp = fileContents.codePointCount(0, startKotlin)
@@ -497,7 +522,7 @@ class AutocompleteIpResolverService(
         return NextEditAutocompleteResponse(
             start_index = startCp,
             end_index = endCp,
-            completion = updatedBlock,
+            completion = replacement,
             confidence = confidence,
             autocomplete_id = autocompleteId,
             completions =
@@ -505,7 +530,7 @@ class AutocompleteIpResolverService(
                     NextEditAutocompletion(
                         start_index = startCp,
                         end_index = endCp,
-                        completion = updatedBlock,
+                        completion = replacement,
                         confidence = confidence,
                         autocomplete_id = autocompleteId,
                     ),
